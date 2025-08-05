@@ -38,7 +38,25 @@ class IPv4:
     dst: str
 
     def __init__(self, buffer: bytes):
-        pass  # TODO
+        # Parse IPv4 header from the provided buffer.
+        b = bytesToBitstring(buffer[0:20])  # IPv4 header is 20 bytes long.
+
+        self.version = bitstringToInt(b[0:4])               # 4 bits for version
+        # convert to bytes since packet length has it in 32-bit words
+        # ex: four 4-byte words = 16 bytes total
+        self.header_len     = bitstringToInt(b[4:8]) * 4    # 4 bits for header length
+        self.tos            = bitstringToInt(b[8:16])       # 8 bits for type of service
+        self.length         = bitstringToInt(b[16:32])      # 16 bits for total length
+        self.id             = bitstringToInt(b[32:48])      # 16 bits for identification
+        self.flags          = bitstringToInt(b[48:51])      # 3 bits for flags
+        self.frag_offset    = bitstringToInt(b[51:64])      # 13 bits for fragment offset
+        self.ttl            = bitstringToInt(b[64:72])      # 8 bits for time to live
+        self.proto          = bitstringToInt(b[72:80])      # 8 bits for protocol
+        self.cksum          = bitstringToInt(b[80:96])      # 16 bits for checksum
+        # Source and destination IP addresses are 32 bits each, split into four 8-bit segments
+        # and convert to decimal dotted notation.
+        self.src = '.'.join(str(bitstringToInt(b[i:i+8])) for i in range(96, 128, 8))
+        self.dst = '.'.join(str(bitstringToInt(b[i:i+8])) for i in range(128, 160, 8))
 
     def __str__(self) -> str:
         return f"IPv{self.version} (tos 0x{self.tos:x}, ttl {self.ttl}, " + \
@@ -60,7 +78,10 @@ class ICMP:
     cksum: int
 
     def __init__(self, buffer: bytes):
-        pass  # TODO
+        b = bytesToBitstring(buffer[20:24])  # ICMP header is 8 bytes long.
+        self.type   = bitstringToInt(b[0:8])        # 8 bits for type
+        self.code   = bitstringToInt(b[8:16])       # 8 bits for code
+        self.cksum  = bitstringToInt(b[16:32])      # 16 bits for checksum
 
     def __str__(self) -> str:
         return f"ICMP (type {self.type}, code {self.code}, " + \
@@ -79,13 +100,46 @@ class UDP:
     cksum: int
 
     def __init__(self, buffer: bytes):
-        pass  # TODO
+        b = bytesToBitstring(buffer[48:64])           # UDP header is 8 bytes long.
+        self.src_port  = bitstringToInt(b[0:16])      # 16 bits for source port
+        self.dst_port  = bitstringToInt(b[16:32])     # 16 bits for destination port
+        self.len       = bitstringToInt(b[32:48])     # 16 bits for length
+        self.cksum     = bitstringToInt(b[48:64])     # 16 bits for checksum
 
     def __str__(self) -> str:
         return f"UDP (src_port {self.src_port}, dst_port {self.dst_port}, " + \
             f"len {self.len}, cksum 0x{self.cksum:x})"
 
-# TODO feel free to add helper functions if you'd like
+# Helper Functions
+def bytesToBitstring(buffer: bytes) -> str:
+    """ Convert a bytes object to a bitstring. """
+    return ''.join(format(byte, '08b') for byte in [*buffer])
+
+def bitstringToInt(bitstring: str) -> int:
+    """ Convert a bitstring to an integer. """
+    return int(bitstring, 2)
+
+def printPacketInfo(buffer: bytes, address: tuple[str, int]) -> None:
+    """ Print the information of the packet. """
+    print(f"Packet bytes: {buffer.hex()}")
+    print(f"Packet is from IP: {address[0]}")
+    print(f"Packet is from port: {address[1]}")
+
+def printHeaderInfo(buffer: bytes) -> None:
+    """ Print the header information of the packet. """
+    ipv4 = IPv4(buffer)
+    icmp = ICMP(buffer)
+    udp = UDP(buffer)
+
+    print(f"IPv4 Header: {IPv4.__str__(ipv4)}")
+    print(f"ICMP Header: {ICMP.__str__(icmp)}")
+    print(f"UDP Header: {UDP.__str__(udp)}")
+
+def sendPacket(sendsock: util.Socket, ip: str, ttl: int, msg: str) -> None:
+    """ Send a packet with the specified TTL. """
+    sendsock.set_ttl(ttl)
+    sendsock.sendto(msg.encode(), (ip, TRACEROUTE_PORT_NUMBER))
+
 
 def traceroute(sendsock: util.Socket, recvsock: util.Socket, ip: str) \
         -> list[list[str]]:
@@ -107,10 +161,14 @@ def traceroute(sendsock: util.Socket, recvsock: util.Socket, ip: str) \
     should be included as the final element in the list.
     """
 
-    # TODO Add your implementation
-    for ttl in range(1, TRACEROUTE_MAX_TTL+1):
-        util.print_result([], ttl)
-    return []
+    sendPacket(sendsock, ip, ttl = 1, msg = "Hello World")
+
+    if recvsock.recv_select(): # check if there is a packet ready to be received
+        buf, address = recvsock.recvfrom() # receive the packet
+
+        printPacketInfo(buf, address)
+        printHeaderInfo(buf)
+        
 
 
 if __name__ == '__main__':
