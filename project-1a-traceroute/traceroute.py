@@ -111,6 +111,7 @@ class UDP:
             f"len {self.len}, cksum 0x{self.cksum:x})"
 
 # Helper Functions
+# Packet Helpers
 def bytesToBitstring(buffer: bytes) -> str:
     """ Convert a bytes object to a bitstring. """
     return ''.join(format(byte, '08b') for byte in [*buffer])
@@ -119,6 +120,7 @@ def bitstringToInt(bitstring: str) -> int:
     """ Convert a bitstring to an integer. """
     return int(bitstring, 2)
 
+# Logging Helpers
 def printPacketInfo(buffer: bytes, address: tuple[str, int]) -> None:
     """ Print the information of the packet. """
     print(f"Packet bytes: {buffer.hex()}")
@@ -140,6 +142,23 @@ def sendPacket(sendsock: util.Socket, ip: str, ttl: int, msg: str) -> None:
     sendsock.set_ttl(ttl)
     sendsock.sendto(msg.encode(), (ip, TRACEROUTE_PORT_NUMBER))
 
+def receivePacket(recvsock: util.Socket) -> str:
+    """ Receive a packet and return the source IP address. """
+    buf, address = recvsock.recvfrom() # receive the packet
+
+    # printPacketInfo(buf, address)
+    # printHeaderInfo(ipv4, icmp, udp)
+
+    return address[0]  # Return the source IP address from the IPv4 header
+
+def prettyPrintTracerouteResult(routers: list[list[str]]) -> None:
+    """ Pretty print the traceroute result. """
+    for ttl, routers_list in enumerate(routers, start=1):
+        if not routers_list:
+            print(f"{ttl: >2}: *")
+        else:
+            print(f"{ttl: >2}: {routers_list}")
+    print("Traceroute completed.")
 
 def traceroute(sendsock: util.Socket, recvsock: util.Socket, ip: str) \
         -> list[list[str]]:
@@ -161,15 +180,30 @@ def traceroute(sendsock: util.Socket, recvsock: util.Socket, ip: str) \
     should be included as the final element in the list.
     """
 
-    sendPacket(sendsock, ip, ttl = 1, msg = "Hello World")
+    MESSAGE = "Hello! I am a little traceroute algorithm. Is this packet size okay?"
 
-    if recvsock.recv_select(): # check if there is a packet ready to be received
-        buf, address = recvsock.recvfrom() # receive the packet
+    routers = []  # List to store routers for each TTL
+    for ttl in range(1, TRACEROUTE_MAX_TTL + 1):
+        ttl_routers = []
 
-        printPacketInfo(buf, address)
-        printHeaderInfo(buf)
+        for _ in range(PROBE_ATTEMPT_COUNT):
+            sendPacket(sendsock, ip, ttl, MESSAGE)
+
+            if recvsock.recv_select(): # check if there is a packet ready to be received
+                router = receivePacket(recvsock)
+                ttl_routers.append(router)
+
+        # Print the result for the current TTL
+        util.print_result(ttl_routers, ttl)
+        routers.append(ttl_routers)
+
+        # If the destination IP is reached, end the traceroute early
+        if ip in ttl_routers: 
+            break
         
-
+    # print(f"Traceroute completed. Discovered routers: {routers}")
+    prettyPrintTracerouteResult(routers)
+    return routers
 
 if __name__ == '__main__':
     args = util.parse_args()
